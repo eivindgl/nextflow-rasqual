@@ -5,12 +5,13 @@ sub MAIN($sampleIDs-path, $bam-dir, *@timepoints) {
   my @file-paths = $bam-dir.IO.dir(test => / '.' bam $/).map(*.Str);
   my @sampleIDs = $sampleIDs-path.IO.lines;
 
-  say "sample\ttimepoint\tbam";
+  say "sample_name\tsample\ttimepoint\tbam";
 
   for @sampleIDs -> $sample-id {
     for @timepoints -> $timepoint {
       my $bam-path = select-bam $sample-id, @file-paths, $timepoint;
-      say "$sample-id\t$timepoint\t{$bam-path.IO.abspath}";
+      my $sample-name = "time{$timepoint}_$sample-id";
+      say "$sample-name\t$sample-id\t$timepoint\t{$bam-path.IO.abspath}";
     }
   }
 }
