@@ -5,7 +5,9 @@ params.GTF = '/apps/data/ftp.sanger.ac.uk/pub/gencode/Gencode_human/release_25/G
 
 
 vcfFiles = Channel.fromPath("${params.vcfDir}/*.vcf")
-rnaBamFiles = Channel.fromPath("${params.bamDir}/*.bam")
+rnaBamFiles = Channel
+		.fromPath("${params.bamDir}/*.bam")
+		.map { file -> tuple(file.baseName, file) }
 
 /* Merges and sorts per_chrom vcf files into a single genome-wide vcf file.
  * The sorting is necessary for allele specific read counting.
@@ -31,17 +33,32 @@ process unify_input_vcf {
  */
 process count_reads {
   input:
-    file sample from rnaBamFiles.take(2)
+    set raw_name, file(sample) from rnaBamFiles
   output:
-    file 'raw_counts.txt' into rnaCounts
+    set raw_name, "counts.txt" into rnaCounts
   module 'Subread'
   executor 'slurm'
+  memory '512 MB'
+  cpus 1
+  time '1h'
 
   """
-  featureCounts -T ${task.cpus} -s 1 -t exon -g gene_id -a "$params.GTF" -o raw_counts.txt $sample
+  featureCounts -T ${task.cpus} -s 1 -t exon -g gene_id -a "$params.GTF" \
+    -o counts.txt $sample
+  """
+}
+
+process readVcfSampleNames {
+  input:
+    file vcf
+  output:
+    file 'vcf_samples.list' into vcfSamples
+  module 'VCFtools'
+  """
+  vcf-query -l $vcf > vcf_samples.list
   """
 }
 
 
-rnaCounts.subscribe { println "RNA Got counts for: $it"}
+//rnaCounts.subscribe { name, path -> println "RNA Got counts for: $name ($path)"}
 vcf.subscribe { println "Got: $it" }

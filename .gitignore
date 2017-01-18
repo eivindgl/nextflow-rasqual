@@ -1,0 +1,4 @@
+.nextflow*
+work/
+out/
+input_data/
