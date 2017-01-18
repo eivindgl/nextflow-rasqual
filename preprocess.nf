@@ -70,29 +70,38 @@ process count_reads {
   """
 }
 
+RnaWithGenotypeList
+  .splitCsv(sep: '\t', header: true)
+  .map { it.values() }
+  .set { RnaGenoItems }
+
 process count_ASE {
-  module GATK
+  publishDir params.preprocessing_ase, mode: 'copy'
+  module 'GATK'
+  executor 'slurm'
   cpus 2
   memory '6 GB'
   time '4 h'
-
+  input:
+    file vcf
+    set sample_id, sample_name, timepoint, file(bam) from RnaGenoItems
+  output:
+    set sample_id, sample_name, timepoint, "${sample_id}_ASE_count.csv" into AseCounts
+    // This should be included to play nice, but I am in a hurry
+    // -Djava.io.tmpdir="\$java_tmp" \
     """
-java \
-   -XX:ParallelGCThreads=1  -Xmx4g \
-   -Djava.io.tmpdir="\$java_tmp" \
-   -jar \${EBROOTGATK-dummy}/GenomeAnalysisTK.jar \
-   -R "$genome_ref" \
-   -T ASEReadCounter \
-   -o "$output_csv" \
-   -I "$input_bam" \
-   -sites "$input_vcf" \
-   -L "$input_vcf" \
-   -U ALLOW_N_CIGAR_READS \
-   -dt NONE \
-   --minMappingQuality 10
-
-
+    java \
+     -XX:ParallelGCThreads=1  -Xmx4g \
+     -jar \${EBROOTGATK-dummy}/GenomeAnalysisTK.jar \
+     -R "$params.genome_ref" \
+     -T ASEReadCounter \
+     -o "${sample_id}_ASE_count.csv" \
+     -I "$bam" \
+     -sites "$vcf" \
+     -L "$vcf" \
+     -U ALLOW_N_CIGAR_READS \
+     -dt NONE \
+     --minMappingQuality 10
     """
 }
-
 
