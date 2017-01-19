@@ -70,6 +70,19 @@ process count_reads {
   """
 }
 
+process rename_gene_counts {
+  publishDir params.preprocessing_dir, mode: 'copy'
+  module 'R/3.3.1-foss-2015b'
+  input:
+    file count_table_raw from rnaCounts
+    file sample_bam_map from RnaWithGenotypeList
+  output:
+    file 'gene_counts.tsv' into rnaCountsFinal
+  """
+  rename_gene_count_file.R $count_table_raw $sample_bam_map gene_counts.tsv
+  """
+}
+
 RnaWithGenotypeList
   .splitCsv(sep: '\t', header: true)
   .map { it.values() }
