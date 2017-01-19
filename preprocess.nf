@@ -84,7 +84,7 @@ process count_ASE {
   time '4 h'
   input:
     file vcf
-    set sample_id, sample_name, timepoint, file(bam) from RnaGenoItems
+    set sample_id, sample_name, timepoint, bam from RnaGenoItems
   output:
     set sample_id, sample_name, timepoint, "${sample_id}_ASE_count.csv" into AseCounts
     // This should be included to play nice, but I am in a hurry
@@ -104,4 +104,24 @@ process count_ASE {
      --minMappingQuality 10
     """
 }
+
+// Creates a file with sample_name -> ASE_count_path, which is required for
+// the mergeAseCounts scripts
+AseCounts
+  .map{"${it[0]}\t${it[3]}"}
+  .collectFile(name: 'sampleID_to_ASECountPath.tsv', newLine: true)
+  .set { ASEPathFile }
+
+process merge_ASE_counts {
+  publishDir params.preprocessing_dir, mode: 'copy'
+  input:
+    file sample_list from ASEPathFile
+  output:
+    file 'ASE_counts.tsv' into mergedASECounts
+
+  """
+  kauralasoo_merge_ASE_counts.py --sample_list $sample_list > ASE_counts.tsv
+  """
+}
+
 
