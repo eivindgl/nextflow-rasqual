@@ -120,10 +120,31 @@ getBM(
       attributes = c('ensembl_gene_id', 'percentage_gc_content'), 
       mart = mart) %>%
   write_csv('gene_gc_prct.tsv')
-
   """
 }
 
+process extract_SNP_coordinates {
+  publishDir params.preprocessing_dir, mode: 'copy'
+  module 'R/3.3.1-foss-2015b'
+  input:
+    file vcf
+  output:
+    file 'snp_coordinates.tsv' into SnpCoordinatesCh
+  """
+#!/usr/bin/env Rscript
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(
+  tidyverse,
+  VariantAnnotation
+)
+readVcf("$vcf", genome='GRCh37') %>%
+  rowRanges() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = 'snp_id') %>%
+  dplyr::select(chr = seqnames, pos = start, snp_id) %>%
+  write_tsv('snp_coordinates.tsv')
+  """
+}
 
 RnaWithGenotypeList
   .splitCsv(sep: '\t', header: true)
