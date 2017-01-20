@@ -51,6 +51,7 @@ process bind_genotype_to_rna {
 }
 bamPaths = bamPathStream.first()
 RnaWithGenotypeList = RnaWithGenotypeStream.first()
+GtfFile = file(params.GTF)
 
 process count_reads {
   publishDir params.preprocessing_dir, mode: 'copy'
@@ -70,18 +71,59 @@ process count_reads {
   """
 }
 
+process compute_exon_unions {
+  publishDir params.preprocessing_dir, mode: 'copy'
+  module 'R/3.3.1-foss-2015b'
+  input:
+    file GtfFile
+  output:
+    file 'exon_unions.tsv' into exonUnions
+  """
+  compute_exon_unions.R $GtfFile exon_unions.tsv
+  """
+}
+
+
 process rename_gene_counts {
   publishDir params.preprocessing_dir, mode: 'copy'
   module 'R/3.3.1-foss-2015b'
   input:
-    file count_table_raw from rnaCounts
+    file raw_count_table from rnaCounts
     file sample_bam_map from RnaWithGenotypeList
   output:
     file 'gene_counts.tsv' into rnaCountsFinal
   """
-  rename_gene_count_file.R $count_table_raw $sample_bam_map gene_counts.tsv
+  rename_gene_count_file.R $raw_count_table $sample_bam_map gene_counts.tsv
   """
 }
+gene_counts = rnaCountsFinal.first()
+
+process get_gene_gc_content_from_biomaRt {
+  publishDir params.preprocessing_dir, mode: 'copy'
+  module 'R/3.3.1-foss-2015b'
+  input:
+  output:
+    file 'gene_gc_prct.tsv' into geneGcPercentageCh
+  """
+#!/usr/bin/env Rscript
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(
+  biomaRt,
+  tidyverse
+)
+ensembl_version = 'feb2014.archive.ensembl.org'
+mart <- useMart(
+    'ENSEMBL_MART_ENSEMBL',
+    host = ensembl_version,
+    dataset = 'hsapiens_gene_ensembl')
+getBM(
+      attributes = c('ensembl_gene_id', 'percentage_gc_content'), 
+      mart = mart) %>%
+  write_csv('gene_gc_prct.tsv')
+
+  """
+}
+
 
 RnaWithGenotypeList
   .splitCsv(sep: '\t', header: true)

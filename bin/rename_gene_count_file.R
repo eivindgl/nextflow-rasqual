@@ -3,7 +3,8 @@ stopifnot(getRversion() >= "3.2.0")
 
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(
-  tidyverse
+  tidyverse,
+  stringr
 )
 args <- commandArgs(trailingOnly = TRUE)
 
@@ -34,7 +35,9 @@ name_mapping <- right_join(bam_name, sample_to_bamid)
 
 df <- df %>%
   # select proper but wrongly named subset
-  select(geneid = 1, one_of(name_mapping$bam)) %>%
+  select(gene_id = 1, one_of(name_mapping$bam)) %>%
+  mutate(ensembl_gene_id = str_extract(gene_id, 'ENSG\\d+')) %>%
+  select(gene_id, ensembl_gene_id, everything()) %>%
   rename_columns_with_bad_names(
     name_mapping$bam, name_mapping$sample_name)
 
