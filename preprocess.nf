@@ -82,6 +82,8 @@ process compute_exon_unions {
   compute_exon_unions.R $GtfFile exon_unions.tsv
   """
 }
+exon_unions = exonUnions.first()
+
 
 
 process rename_gene_counts {
@@ -145,6 +147,7 @@ readVcf("$vcf", genome='GRCh37') %>%
   write_tsv('snp_coordinates.tsv')
   """
 }
+snp_coord = SnpCoordinatesCh.first()
 
 RnaWithGenotypeList
   .splitCsv(sep: '\t', header: true)
@@ -201,3 +204,34 @@ process merge_ASE_counts {
 }
 
 
+/* Feature SNPs are within exons (used to estimate ASE)
+ * Regulatory SNPs are outside exons but within a CIS-window of the gene
+ */
+process count_regulatory_and_feature_SNPs_per_gene_cis_window {
+  publishDir params.preprocessing_dir, mode: 'copy'
+  module 'R/3.3.1-foss-2015b'
+  input:
+    file exon_unions
+    file snp_coord
+  output:
+    file 'gene_cis_snp_count.tsv' into geneCisSnpCountCh
+  """
+  #!/usr/bin/env Rscript
+  if (!require("pacman")) install.packages("pacman")
+  pacman::p_load(
+    tidyverse,
+    devtools
+  )
+  devtools::install_github("kauralasoo/rasqual/rasqualTools")
+  library(rasqualTools)
+
+  exon_unions <- read_tsv("$exon_unions", col_types = cols(
+    .default = col_guess(), 
+    exon_starts = 'c',
+    exon_ends = 'c'))
+  snp_coords  <- read_tsv("$snp_coord")
+  countSnpsOverlapingExons(exon_unions, snp_coords, 
+			   cis_window = ${params.snp_window_size}) %>%
+    write_tsv('gene_cis_snp_count.tsv')
+  """
+}
