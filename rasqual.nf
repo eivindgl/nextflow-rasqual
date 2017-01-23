@@ -17,6 +17,8 @@ params.gene_cis_snp_count = 'out/preprocessing/gene_cis_snp_count.tsv'
 gene_cis_snp_count = file(params.gene_cis_snp_count)
 
 process create_vcf_copy_with_timepoint_prefix {
+  module 'VCFtools'
+  module 'BCFtools'
   input:
     file orig_vcf from orig_vcf
     val timepoint from params.timepoints
@@ -39,6 +41,7 @@ process create_vcf_copy_with_timepoint_prefix {
 timepointVcfCh.into { allTimepointsInputCh; timepointsVcfCh }
 
 process compress_and_index_vcf_prior_to_merge {
+  module 'BCFtools'
   input:
     set timepoint, file('tp.vcf') from allTimepointsInputCh
   output:
@@ -51,6 +54,7 @@ process compress_and_index_vcf_prior_to_merge {
 }
 
 process merge_all_vcf_timepoints {
+  module 'BCFtools'
   input:
     file('vcf/*') from allTimepointsInputGzCh.toList()
     file('vcf/*') from allTimepointsInputGzIndexCh.toList()
@@ -67,6 +71,7 @@ timepointsVcfCh
 
 process extract_RNA_to_genotype_mapfile {
   publishDir "${params.timepoint_base_dir}/time_${timepoint}", mode: 'copy'
+  module 'VCFtools'
   input:
     set val(timepoint), file(vcf) from vcfCh
     file gene_counts
@@ -87,6 +92,7 @@ process extract_RNA_to_genotype_mapfile {
 
 process combine_genotype_and_ASE_counts {
   publishDir "${params.timepoint_base_dir}/time_${timepoint}", mode: 'copy'
+  module 'VCFtools'
   input:
   set val(timepoint), file(vcf), file(sample_map) from svcfCh
   file ase_counts
@@ -106,6 +112,7 @@ process combine_genotype_and_ASE_counts {
 
 process generate_timepoint_count_and_factor_tables {
   publishDir "${params.timepoint_base_dir}/time_${timepoint}", mode: 'copy'
+  module 'R/3.3.1-foss-2015b'
   input:
     file gene_gc
     set val(timepoint), file(vcf), file(sample_map), file(ASE_vcf), file(ASE_vcf_idx) from csvcfCh
@@ -123,7 +130,8 @@ process split_into_rasqual_batches {
 	file(gene_counts_bin), file(size_factors_bin), file(gene_counts_tsv) from rasqualInCh
   output:
     set val(timepoint), file(sample_map), file(ASE_vcf), file(ASE_vcf_idx),
-	file(gene_counts_bin), file(size_factors_bin), file('geneids.txt'), file('geneid_batch_*') into runRasqualCh mode flatten
+	file(gene_counts_bin), file(size_factors_bin), file('geneids.txt'), 
+	file('geneid_batch_*') into runRasqualCh mode flatten
   """
   tail -n +2 $gene_counts_tsv | cut -f 1 > geneids.txt
   split -l $params.batch_size geneids.txt geneid_batch_
@@ -131,9 +139,15 @@ process split_into_rasqual_batches {
   """
 }
 
-runRasqualCh.into { runLeadCh, runAllCh }
+runRasqualCh.into { runLeadCh ; runAllCh }
 
 process run_rasqual_all_SNPs {
+  module 'GSL'
+  module 'VCFtools'
+  executor 'slurm'
+  memory '1 GB'
+  cpus 1
+  time '2 h'
   input:
     file gene_cis_snp_count
     set val(timepoint), file(sample_map), file(ASE_vcf), file(ASE_vcf_idx),
@@ -159,10 +173,16 @@ process run_rasqual_all_SNPs {
 }
 
 process run_rasqual_lead_SNPs {
+  module 'GSL'
+  module 'VCFtools'
+  executor 'slurm'
+  memory '1 GB'
+  cpus 1
+  time '2 h'
   input:
     file gene_cis_snp_count
     set val(timepoint), file(sample_map), file(ASE_vcf), file(ASE_vcf_idx),
-	file(gene_counts_bin), file(size_factors_bin), file(geneids), file(geneid_batch) from runAllCh
+	file(gene_counts_bin), file(size_factors_bin), file(geneids), file(geneid_batch) from runLeadCh
   output:
     set val(timepoint), file("rasqual_raw_time${timepoint}.*.txt") into rasqRawLeadCh
   """
