@@ -4,40 +4,97 @@
 params.orig_vcf = 'out/preprocessing/all.vcf'
 orig_vcf = file(params.orig_vcf)
 
+params.gene_counts= 'out/preprocessing/gene_counts.tsv'
+gene_counts = file(params.gene_counts)
+
+params.ase_counts= 'out/preprocessing/ASE_counts.tsv'
+ase_counts = file(params.ase_counts)
+
 process create_vcf_copy_with_timepoint_prefix {
   input:
     file orig_vcf from orig_vcf
     val timepoint from params.timepoints
   output:
-    set timepoint, "time_${timepoint}.vcf.gz" into timepointVcfCh
-    file "time_${timepoint}.vcf.gz.csi" into timepointVcfIndexCh
+    set timepoint, "time_${timepoint}.vcf" into timepointVcfCh
   shell:
   '''
-  dst="time_!{timepoint}.vcf.gz"
+  dst="time_!{timepoint}.vcf"
   mkdir -p tmp
   tmp_dir=$(mktemp -d -p tmp)
   tmp=$(mktemp -p tmp)
   src=$tmp_dir/orig.vcf.gz
   bgzip -c !{orig_vcf} > $src
-  bcftools query -l $src | awk -v g=!{timepoint}_ '{ print g $0 }'  > $tmp
-  bcftools reheader -s $tmp $src > $dst
-  bcftools index $dst
-  rm -fr $tmp_dir # deletes $tmp and $tmp_dir
+  bcftools query -l $src | awk -v g=time!{timepoint}_ '{ print g $0 }'  > $tmp
+  bcftools reheader -s $tmp $src > ${dst}.gz
+  bcftools convert -O v -o $dst ${dst}.gz
+  rm -fr $tmp_dir ${dst}.gz # deletes $tmp and $tmp_dir
   '''
 }
 timepointVcfCh.into { allTimepointsInputCh; timepointsVcfCh }
 
+process compress_and_index_vcf_prior_to_merge {
+  input:
+    set timepoint, file('tp.vcf') from allTimepointsInputCh
+  output:
+    file "time_${timepoint}.vcf.gz" into allTimepointsInputGzCh
+    file "time_${timepoint}.vcf.gz.csi" into allTimepointsInputGzIndexCh
+  """
+  bcftools convert -O z -o time_${timepoint}.vcf.gz tp.vcf
+  bcftools index time_${timepoint}.vcf.gz
+  """
+}
+
 process merge_all_vcf_timepoints {
   input:
-    set file(vcf_0), file(vcf_10), file(vcf_30), file(vcf_180) from allTimepointsInputCh.map{ it[1] }.toList()
-    file tpIndices from timepointVcfIndexCh.toList()
+    file('vcf/*') from allTimepointsInputGzCh.toList()
+    file('vcf/*') from allTimepointsInputGzIndexCh.toList()
   output:
-    set val('all'), 'all_timepoints.vcf.gz' into mergedVcfCh
+    set val('all'), 'all_timepoints.vcf' into mergedVcfCh
   """
-  bcftools merge -o all_timepoints.vcf.gz -O z $vcf_0 $vcf_10 $vcf_30 $vcf_180
+  bcftools merge -o all_timepoints.vcf -O v vcf/*.vcf.gz
   """
 }
 
 timepointsVcfCh
   .mix(mergedVcfCh)
   .set{vcfCh}
+
+process extract_RNA_to_genotype_mapfile {
+  publishDir "${params.timepoint_base_dir}/time_${timepoint}", mode: 'copy'
+  input:
+  set val(timepoint), file(vcf) from vcfCh
+  file gene_counts
+  output:
+  set timepoint, file(vcf), "sample_genotype_map.list" into svcfCh
+  shell:
+  '''
+  # crude check that each genotype has an entry in RNA count file
+  for gt in $(vcf-query -l !{vcf}) ; do
+    if ! grep -q $gt <(head -1 !{gene_counts}) ; then
+      echo "Genotype $gt not present in gene counts file: !{gene_counts}"
+      exit 1
+    fi
+  done
+  vcl-query -l !{vcf} | awk '{ print $1 "\t" $1 }' > "sample_genotype_map.list"
+  '''
+}
+
+process combine_genotype_and_ASE_counts {
+  publishDir "${params.timepoint_base_dir}/time_${timepoint}", mode: 'copy'
+  input:
+  set val(timepoint), file(vcf), file(sample_map) from svcfCh
+  file ase_counts
+  output:
+  set timepoint, file(vcf), file(sample_map), 'ASE_genotype.vcf.gz', 'ASE_genotype.vcf.gz.tbi' into csvcfCh
+  """
+  # piping into bgzip masks errors, so we make a tmp file
+  add_ASE_to_vcf.py \
+    --ASEcounts ${ase_counts} \
+    --ASESampleGenotypeMap ${sample_map} \
+    --VCFfile ${vcf} > tmp.vcf
+  bgzip tmp.vcf -c > ASE_genotype.vcf.gz
+  tabix -p vcf ASE_genotype.vcf.gz
+  rm tmp.vcf
+  """
+}
+
