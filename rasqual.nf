@@ -131,13 +131,15 @@ process split_into_rasqual_batches {
   """
 }
 
-process run_rasqual {
+runRasqualCh.into { runLeadCh, runAllCh }
+
+process run_rasqual_all_SNPs {
   input:
     file gene_cis_snp_count
     set val(timepoint), file(sample_map), file(ASE_vcf), file(ASE_vcf_idx),
-	file(gene_counts_bin), file(size_factors_bin), file(geneids), file(geneid_batch) from runRasqualCh 
+	file(gene_counts_bin), file(size_factors_bin), file(geneids), file(geneid_batch) from runAllCh
   output:
-    set val(timepoint), file("time${timepoint}.*.txt")
+    set val(timepoint), file("rasqual_raw_time${timepoint}*.txt") into rasqRawAllCh
   """
   n=\$(wc -l < $sample_map)
   echo -ne "${geneid_batch}\t" | cat - <( paste -sd "," $geneid_batch) | \
@@ -146,12 +148,36 @@ process run_rasqual {
     --offsets $size_factors_bin \
     --n \$n \
     --vcf $ASE_vcf \
-    --outprefix "time${timepoint}" \
+    --outprefix "rasqual_raw_time${timepoint}" \
     --geneids $geneids \
     --geneMetadata $gene_cis_snp_count \
     --execute True \
     --rasqualBin rasqual
     # add this before batch_file line for lead snp analysis
     #--parameters '\\--lead-snp' \
+  """
+}
+
+process run_rasqual_lead_SNPs {
+  input:
+    file gene_cis_snp_count
+    set val(timepoint), file(sample_map), file(ASE_vcf), file(ASE_vcf_idx),
+	file(gene_counts_bin), file(size_factors_bin), file(geneids), file(geneid_batch) from runAllCh
+  output:
+    set val(timepoint), file("rasqual_raw_time${timepoint}.*.txt") into rasqRawLeadCh
+  """
+  n=\$(wc -l < $sample_map)
+  echo -ne "${geneid_batch}\t" | cat - <( paste -sd "," $geneid_batch) | \
+    runRasqual.py \
+    --readCounts $gene_counts_bin \
+    --offsets $size_factors_bin \
+    --n \$n \
+    --vcf $ASE_vcf \
+    --outprefix "rasqual_batch_time${timepoint}" \
+    --geneids $geneids \
+    --geneMetadata $gene_cis_snp_count \
+    --execute True \
+    --rasqualBin rasqual
+    --parameters '\\--lead-snp' \
   """
 }
