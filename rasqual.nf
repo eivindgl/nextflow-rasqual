@@ -10,6 +10,12 @@ gene_counts = file(params.gene_counts)
 params.ase_counts= 'out/preprocessing/ASE_counts.tsv'
 ase_counts = file(params.ase_counts)
 
+params.gene_gc_content = 'out/preprocessing/gene_gc_prct.tsv'
+gene_gc = file(params.gene_gc_content)
+
+params.gene_cis_snp_count = 'out/preprocessing/gene_cis_snp_count.tsv'
+gene_cis_snp_count = file(params.gene_cis_snp_count)
+
 process create_vcf_copy_with_timepoint_prefix {
   input:
     file orig_vcf from orig_vcf
@@ -62,10 +68,10 @@ timepointsVcfCh
 process extract_RNA_to_genotype_mapfile {
   publishDir "${params.timepoint_base_dir}/time_${timepoint}", mode: 'copy'
   input:
-  set val(timepoint), file(vcf) from vcfCh
-  file gene_counts
+    set val(timepoint), file(vcf) from vcfCh
+    file gene_counts
   output:
-  set timepoint, file(vcf), "sample_genotype_map.list" into svcfCh
+    set timepoint, file(vcf), "sample_genotype_map.list" into svcfCh
   shell:
   '''
   # crude check that each genotype has an entry in RNA count file
@@ -75,7 +81,7 @@ process extract_RNA_to_genotype_mapfile {
       exit 1
     fi
   done
-  vcl-query -l !{vcf} | awk '{ print $1 "\t" $1 }' > "sample_genotype_map.list"
+  vcf-query -l !{vcf} | awk '{ print $1 "\t" $1 }' > "sample_genotype_map.list"
   '''
 }
 
@@ -98,3 +104,54 @@ process combine_genotype_and_ASE_counts {
   """
 }
 
+process generate_timepoint_count_and_factor_tables {
+  publishDir "${params.timepoint_base_dir}/time_${timepoint}", mode: 'copy'
+  input:
+    file gene_gc
+    set val(timepoint), file(vcf), file(sample_map), file(ASE_vcf), file(ASE_vcf_idx) from csvcfCh
+  output:
+    set val(timepoint), file(sample_map), file(ASE_vcf), file(ASE_vcf_idx),
+	file('gene_counts.bin'), file('size_factors.bin'), file('gene_counts.tsv') into rasqualInCh
+  """
+  compute_exp_counts_and_factors.R $sample_map $gene_gc $gene_counts size_factors.bin gene_counts.bin gene_counts.tsv
+  """
+}
+
+process split_into_rasqual_batches {
+  input:
+    set val(timepoint), file(sample_map), file(ASE_vcf), file(ASE_vcf_idx),
+	file(gene_counts_bin), file(size_factors_bin), file(gene_counts_tsv) from rasqualInCh
+  output:
+    set val(timepoint), file(sample_map), file(ASE_vcf), file(ASE_vcf_idx),
+	file(gene_counts_bin), file(size_factors_bin), file('geneids.txt'), file('geneid_batch_*') into runRasqualCh mode flatten
+  """
+  tail -n +2 $gene_counts_tsv | cut -f 1 > geneids.txt
+  split -l $params.batch_size geneids.txt geneid_batch_
+
+  """
+}
+
+process run_rasqual {
+  input:
+    file gene_cis_snp_count
+    set val(timepoint), file(sample_map), file(ASE_vcf), file(ASE_vcf_idx),
+	file(gene_counts_bin), file(size_factors_bin), file(geneids), file(geneid_batch) from runRasqualCh 
+  output:
+    set val(timepoint), file("time${timepoint}.*.txt")
+  """
+  n=\$(wc -l < $sample_map)
+  echo -ne "${geneid_batch}\t" | cat - <( paste -sd "," $geneid_batch) | \
+    runRasqual.py \
+    --readCounts $gene_counts_bin \
+    --offsets $size_factors_bin \
+    --n \$n \
+    --vcf $ASE_vcf \
+    --outprefix "time${timepoint}" \
+    --geneids $geneids \
+    --geneMetadata $gene_cis_snp_count \
+    --execute True \
+    --rasqualBin rasqual
+    # add this before batch_file line for lead snp analysis
+    #--parameters '\\--lead-snp' \
+  """
+}

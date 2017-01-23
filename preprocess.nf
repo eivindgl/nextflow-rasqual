@@ -121,7 +121,7 @@ mart <- useMart(
 getBM(
       attributes = c('ensembl_gene_id', 'percentage_gc_content'), 
       mart = mart) %>%
-  write_csv('gene_gc_prct.tsv')
+  write_tsv('gene_gc_prct.tsv')
   """
 }
 
