@@ -1,5 +1,5 @@
 .nextflow*
 work/
 out/
-input_data/
+input_data/vcf_by_chrom
 .Rproj.user
