@@ -54,10 +54,11 @@ process compress_and_index_vcf_prior_to_merge {
 }
 
 process merge_all_vcf_timepoints {
+  //cache 'deep'
   module 'BCFtools'
   input:
-    file('vcf/*') from allTimepointsInputGzCh.toList()
-    file('vcf/*') from allTimepointsInputGzIndexCh.toList()
+    file('vcf/*') from allTimepointsInputGzCh.toSortedList()
+    file('vcf/*') from allTimepointsInputGzIndexCh.toSortedList()
   output:
     set val('all'), 'all_timepoints.vcf' into mergedVcfCh
   """
@@ -66,7 +67,7 @@ process merge_all_vcf_timepoints {
 }
 
 timepointsVcfCh
-  .mix(mergedVcfCh)
+  .mix(mergedVcfCh) 
   .set{vcfCh}
 
 process extract_RNA_to_genotype_mapfile {
@@ -167,8 +168,6 @@ process run_rasqual_all_SNPs {
     --geneMetadata $gene_cis_snp_count \
     --execute True \
     --rasqualBin rasqual
-    # add this before batch_file line for lead snp analysis
-    #--parameters '\\--lead-snp' \
   """
 }
 
@@ -193,11 +192,36 @@ process run_rasqual_lead_SNPs {
     --offsets $size_factors_bin \
     --n \$n \
     --vcf $ASE_vcf \
-    --outprefix "rasqual_batch_time${timepoint}" \
+    --outprefix "rasqual_raw_time${timepoint}" \
     --geneids $geneids \
     --geneMetadata $gene_cis_snp_count \
     --execute True \
-    --rasqualBin rasqual
-    --parameters '\\--lead-snp' \
+    --rasqualBin rasqual \
+    --parameters '\\--lead-snp'
   """
 }
+
+rasqRawLeadCh
+  .collectFile(
+    newLine: true, 
+    storeDir: "${params.timepoint_base_dir}/rasqual_full_output") {
+    [ 
+      "time_${it[0]}_lead_SNPs.rasqual_txt",
+      it[1]
+    ]
+  }
+  .view { "Raw Lead SNPs file: $it.name" }
+  .set { RawLeadFullCh }
+
+rasqRawAllCh
+  .collectFile(
+    newLine: true, 
+    storeDir: "${params.timepoint_base_dir}/rasqual_full_output") {
+    [ 
+      "time_${it[0]}_all_SNPs.rasqual_txt",
+      it[1]
+    ]
+  }
+  .view { "Raw All SNPs file: $it.name" }
+  .set { RawAllFullCh }
+
