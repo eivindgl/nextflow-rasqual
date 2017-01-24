@@ -16,6 +16,9 @@ gene_gc = file(params.gene_gc_content)
 params.gene_cis_snp_count = 'out/preprocessing/gene_cis_snp_count.tsv'
 gene_cis_snp_count = file(params.gene_cis_snp_count)
 
+params.ced_ld_snps = 'input_data/CeD_LD_SNPs_Iris_maf-.001_r2-9.bed'
+CeD_LD_SNPs = file(params.ced_ld_snps)
+
 process create_vcf_copy_with_timepoint_prefix {
   module 'VCFtools'
   module 'BCFtools'
@@ -203,7 +206,6 @@ process run_rasqual_lead_SNPs {
 
 rasqRawLeadCh
   .collectFile(
-    newLine: true, 
     storeDir: "${params.timepoint_base_dir}/rasqual_full_output") {
     [ 
       "time_${it[0]}_lead_SNPs.rasqual_txt",
@@ -215,7 +217,6 @@ rasqRawLeadCh
 
 rasqRawAllCh
   .collectFile(
-    newLine: true, 
     storeDir: "${params.timepoint_base_dir}/rasqual_full_output") {
     [ 
       "time_${it[0]}_all_SNPs.rasqual_txt",
@@ -225,3 +226,23 @@ rasqRawAllCh
   .view { "Raw All SNPs file: $it.name" }
   .set { RawAllFullCh }
 
+RawLeadFullCh.into { CeDSubLeadInputCh ; GenomeWideInputCh }
+
+CeDSubLeadInputCh
+  .mix(RawAllFullCh)
+  .map { 
+  (full_string, timepoint, run_mode) = (it.baseName =~ /time_([^_]+)_([^_]+).*/)[0]
+  [run_mode, timepoint, it]
+}.into { CeDSubInputCh }
+
+process subset_CeD_LD_SNPs_from_rasqual_raw {
+  module 'Python/3.5.1-foss-2015b'
+  input:
+    file CeD_LD_SNPs
+    set run_mode, timepoint, 'rasqual_output.txt' from CeDSubInputCh
+  output:
+    set run_mode, timepoint, 'rasqual_CeD_LD_output.txt' into CedSubCh
+  """
+  filter_rasqual_by_SNP_subset.py $CeD_LD_SNPs -i rasqual_output.txt -o rasqual_CeD_LD_output.txt
+  """
+}
