@@ -2,7 +2,9 @@
 stopifnot(getRversion() >= "3.2.0")
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(
-  tidyverse
+  tidyverse,
+  stringr,
+  biomaRt
 )
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -10,7 +12,6 @@ path <- list(
   raw_rasqual_input = args[1],
   annotated_output = args[2]
 )
-
 
 header = c(
   'gene_id',
@@ -38,13 +39,31 @@ header = c(
   'Convergence',
   'Squared correlation between prior and posterior genotypes (fSNPs)',
   'Squared correlation between prior and posterior genotypes (rSNP)*')
-
+#path <- list(raw_rasqual_input = 'rasqual_CeD_LD_output.txt')
 df <- read_tsv(path$raw_rasqual_input, col_names = header) %>%
   dplyr::select(gene_id, rs_id, chrom, pos, ChiSq, effectSz, LogLikH0) %>%
   mutate(
     pval = pchisq(ChiSq, 1, lower.tail = FALSE),
     FDR = p.adjust(pval, method = 'BH')) %>%
-  arrange(FDR)
+  arrange(FDR) %>%
+  mutate(ensembl_gene_id = str_extract(gene_id, '^ENSG\\d+'))
+
+
+ensembl_version = 'feb2014.archive.ensembl.org'
+ensembl_connect <- function(ensembl_version = 'feb2014.archive.ensembl.org') {
+  useMart(
+    'ENSEMBL_MART_ENSEMBL',
+    host = ensembl_version,
+    dataset = 'hsapiens_gene_ensembl')
+}
+mart = ensembl_connect()
+gene_names <- getBM(attributes = c(
+  'ensembl_gene_id', 'external_gene_id', 'gene_biotype'),
+      filters = 'ensembl_gene_id',
+      values = df$ensembl_gene_id,
+      mart = mart)
 
 df %>%
+  left_join(gene_names) %>%
+  dplyr::select(ensembl_gene_id, external_gene_id, rs_id, chrom, pos, pval, FDR, effectSz, everything()) %>%
   write_tsv(path$annotated_output)
