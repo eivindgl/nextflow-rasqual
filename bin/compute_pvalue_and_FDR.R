@@ -10,7 +10,9 @@ pacman::p_load(
 args <- commandArgs(trailingOnly = TRUE)
 path <- list(
   raw_rasqual_input = args[1],
-  annotated_output = args[2]
+  annotated_output = args[2],
+  run_mode = args[3],
+  timepoint = args[4]
 )
 
 header = c(
@@ -44,8 +46,11 @@ df <- read_tsv(path$raw_rasqual_input, col_names = header) %>%
   dplyr::select(gene_id, rs_id, chrom, pos, ChiSq, effectSz, LogLikH0) %>%
   mutate(
     pval = pchisq(ChiSq, 1, lower.tail = FALSE),
-    FDR = p.adjust(pval, method = 'BH')) %>%
-  mutate(ensembl_gene_id = str_extract(gene_id, '^ENSG\\d+'))
+    FDR = p.adjust(pval, method = 'BH'),
+    ensembl_gene_id = str_extract(gene_id, '^ENSG\\d+'),
+    run_mode = path$run_mode,
+    timepoint = path$timepoint
+  )
 
 
 ensembl_version = 'feb2014.archive.ensembl.org'
