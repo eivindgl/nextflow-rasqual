@@ -19,6 +19,9 @@ gene_cis_snp_count = file(params.gene_cis_snp_count)
 params.ced_ld_snps = 'input_data/CeD_LD_SNPs_Iris_maf-.001_r2-9.bed'
 CeD_LD_SNPs = file(params.ced_ld_snps)
 
+params.norm_gene_counts = 'out/preprocessing/normalized_gene_counts.tsv'
+norm_gene_counts = file(params.norm_gene_counts)
+
 process create_vcf_copy_with_timepoint_prefix {
   module 'VCFtools'
   module 'BCFtools'
