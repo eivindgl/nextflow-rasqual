@@ -45,7 +45,6 @@ df <- read_tsv(path$raw_rasqual_input, col_names = header) %>%
   mutate(
     pval = pchisq(ChiSq, 1, lower.tail = FALSE),
     FDR = p.adjust(pval, method = 'BH')) %>%
-  arrange(FDR) %>%
   mutate(ensembl_gene_id = str_extract(gene_id, '^ENSG\\d+'))
 
 
@@ -66,4 +65,5 @@ gene_names <- getBM(attributes = c(
 df %>%
   left_join(gene_names) %>%
   dplyr::select(ensembl_gene_id, external_gene_id, rs_id, chrom, pos, pval, FDR, effectSz, everything()) %>%
+  arrange(pval) %>%
   write_tsv(path$annotated_output)

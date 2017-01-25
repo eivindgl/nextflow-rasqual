@@ -212,7 +212,6 @@ rasqRawLeadCh
       it[1]
     ]
   }
-  .view { "Raw Lead SNPs file: $it.name" }
   .set { RawLeadFullCh }
 
 rasqRawAllCh
@@ -223,7 +222,6 @@ rasqRawAllCh
       it[1]
     ]
   }
-  .view { "Raw All SNPs file: $it.name" }
   .set { RawAllFullCh }
 
 RawLeadFullCh.into { CeDSubLeadInputCh ; GenomeWideInputCh }
@@ -244,5 +242,17 @@ process subset_CeD_LD_SNPs_from_rasqual_raw {
     set run_mode, timepoint, 'rasqual_CeD_LD_output.txt' into CedSubCh
   """
   filter_rasqual_by_SNP_subset.py $CeD_LD_SNPs -i rasqual_output.txt -o rasqual_CeD_LD_output.txt
+  """
+}
+
+process add_pvalue_FDR_and_annotations {
+  publishDir "${params.timepoint_base_dir}/CeD_LD_subset", mode: 'copy'
+  module 'R/3.3.1-foss-2015b'
+  input:
+    set run_mode, timepoint, 'rasqual_output.txt' from CedSubCh
+  output:
+    file "LD_subset_${run_mode}_${timepoint}.tsv" into CedSubResults
+  """
+  compute_pvalue_and_FDR.R rasqual_output.txt "LD_subset_${run_mode}_${timepoint}.tsv"
   """
 }
