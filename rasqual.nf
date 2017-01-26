@@ -60,7 +60,7 @@ process compress_and_index_vcf_prior_to_merge {
 }
 
 process merge_all_vcf_timepoints {
-  //cache 'deep'
+  publishDir "${params.timepoint_base_dir}", mode: 'copy'
   module 'BCFtools'
   input:
     file('vcf/*') from allTimepointsInputGzCh.toSortedList()
@@ -217,6 +217,7 @@ rasqRawLeadCh
   }
   .set { RawLeadFullCh }
 
+  
 rasqRawAllCh
   .collectFile(
     storeDir: "${params.timepoint_base_dir}/rasqual_full_output") {
@@ -226,106 +227,3 @@ rasqRawAllCh
     ]
   }
   .set { RawAllFullCh }
-
-RawLeadFullCh.into { CeDSubLeadInputCh ; GenomeWideInputCh }
-
-CeDSubLeadInputCh
-  .mix(RawAllFullCh)
-  .map { 
-  (full_string, timepoint, run_mode) = (it.baseName =~ /time_([^_]+)_([^_]+).*/)[0]
-  [run_mode, timepoint, it]
-}.into { CeDSubInputCh }
-
-process subset_CeD_LD_SNPs_from_rasqual_raw {
-  module 'Python/3.5.1-foss-2015b'
-  input:
-    file CeD_LD_SNPs
-    set run_mode, timepoint, 'rasqual_output.txt' from CeDSubInputCh
-  output:
-    set run_mode, timepoint, 'rasqual_CeD_LD_output.txt' into CedSubCh
-  """
-  filter_rasqual_by_SNP_subset.py $CeD_LD_SNPs -i rasqual_output.txt -o rasqual_CeD_LD_output.txt
-  """
-}
-
-process add_pvalue_FDR_and_annotations {
-  publishDir "${params.timepoint_base_dir}/CeD_LD_subset", mode: 'copy'
-  module 'R/3.3.1-foss-2015b'
-  input:
-    set run_mode, timepoint, 'rasqual_output.txt' from CedSubCh
-  output:
-    file "LD_subset_${run_mode}_${timepoint}.tsv" into CedSubResultsPre
-  """
-  compute_pvalue_and_FDR.R rasqual_output.txt "LD_subset_${run_mode}_${timepoint}.tsv" $run_mode $timepoint
-  """
-}
-CedSubResultsPre.into { CedSubResults ; CedMinGenePre }
-
-//process merge_FDR_sig_CeD_genes {
-  //publishDir "${params.timepoint_base_dir}/CeD_LD_subset", mode: 'copy'
-  //module 'R/3.3.1-foss-2015b'
-  //input:
-    //file('tsv/*') from CedSubResults.toSortedList()
-  //output:
-    //file('merged_sig_CeD_LD_subset.tsv') into MergedLDSigCh
-  //"""
-    //echo Rscript merge merged_sig_CeD_LD_subset tsv[> 
-  //"""
-//}
-
-
-process recompute_FDR_with_best_SNP_per_gene_only{
-  publishDir "${params.timepoint_base_dir}/CeD_LD_subset_1gene", mode: 'copy'
-  module 'R/3.3.1-foss-2015b'
-  input:
-    file tsv from CedMinGenePre.filter{ it.baseName =~ /_all_/ }
-  output:
-    file("best_SNP_${tsv}") into bestLDSnpGeneCh
-  """
-  #!/usr/bin/env Rscript
-  stopifnot(getRversion() >= "3.2.0")
-  if (!require("pacman")) install.packages("pacman")
-  pacman::p_load(
-    tidyverse
-  )
-  df <- read_tsv("$tsv") %>% 
-    group_by(ensembl_gene_id) %>% 
-    slice(which.min(pval)) %>% 
-    ungroup() %>% 
-    mutate(
-      FDR = p.adjust(pval, method = 'BH')
-    ) %>% 
-    arrange(pval) %>% 
-    write_tsv("best_SNP_${tsv}")
-  """
-}
-
-process merge_FDR_sig_genes {
-  publishDir "${params.timepoint_base_dir}/CeD_LD_subset_1gene", mode: 'copy'
-  module 'R/3.3.1-foss-2015b'
-  input:
-    file('tsv/*') from bestLDSnpGeneCh.toSortedList()
-  output:
-    file('best_SNP_Gene_merged.tsv') into MergedLDSigCh
-  """
-  #!/usr/bin/env Rscript
-  stopifnot(getRversion() >= "3.2.0")
-  if (!require("pacman")) install.packages("pacman")
-  pacman::p_load(
-    tidyverse,
-    purrr
-  )
-
-  list.files("tsv", full.names = TRUE) %>% 
-    map(~ read_tsv(.x, col_types = cols(
-      .default = col_guess(),
-      timepoint = 'c'
-    ))) %>% 
-    bind_rows() %>% 
-    filter(FDR < 0.05) %>% 
-    arrange(external_gene_id, run_mode, timepoint) %>% 
-    write_tsv("best_SNP_Gene_merged.tsv")
-  """
-}
-    
-  
