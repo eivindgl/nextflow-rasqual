@@ -1,5 +1,46 @@
 CeD_LD_SNPs = file('input_data/CeD_LD_SNPs_Iris_maf-.001_r2-9.bed')
-gene_counts = file('out/preprocessing/gene_counts.tsv')
+gene_counts = file("${params.preprocessing_dir}/gene_counts.tsv")
+vcf = file ("${params.timepoint_base_dir}/all_timepoints.vcf")
+
+process normalize_count_table {
+  publishDir params.post_proc_dir, mode: 'copy'
+  //module 'R/3.3.1-foss-2015b'
+
+  input:
+    file 'gene_counts.tsv' from gene_counts
+  output:
+    file 'normalized_gene_counts.tsv' into norm_gene_counts_ch
+  '''
+  #!/usr/bin/env Rscript
+  if (!require("pacman")) install.packages("pacman")
+  pacman::p_load(
+    tidyverse,
+    stringr,
+    DESeq2
+  )
+
+  raw_counts <- read_tsv('gene_counts.tsv') %>% 
+    dplyr::select(-ensembl_gene_id) %>% 
+    as.data.frame() %>% 
+    column_to_rownames('gene_id')
+
+  meta <- tibble(sample_name = names(raw_counts)) 
+  x <- meta$sample_name %>% 
+    str_split_fixed('_', 2) %>% 
+    as_tibble()
+  colnames(x) <- c('timepoint', 'sampleID')
+  meta <- meta %>% bind_cols(x)
+
+  DESeqDataSetFromMatrix(raw_counts, colData = meta, design = ~ sampleID + timepoint) %>% 
+    estimateSizeFactors() %>% 
+    varianceStabilizingTransformation(blind = FALSE) %>%
+    assay() %>% 
+    as.data.frame() %>% 
+    rownames_to_column(var = 'gene_id') %>% 
+    write_tsv('normalized_gene_counts.tsv')
+  '''
+}
+norm_gene_counts = norm_gene_counts_ch.first()
 
 Channel.fromPath('out/timepoint/rasqual_full_output/*_txt')
   .map { 
@@ -107,42 +148,17 @@ process merge_FDR_sig_genes {
     write_tsv("best_SNP_Gene_merged.tsv")
   """
 }
-    
-process normalize_count_table {
-  publishDir params.post_proc_dir, mode: 'copy'
-  //module 'R/3.3.1-foss-2015b'
 
+process plot_top_CeD_eQTLs {
+  publishDir "${params.post_proc_dir}/CeD_LD_top_eQTL_plots", mode: 'copy'
   input:
-    file 'gene_counts.tsv' from gene_counts
+    file merged_eQTLs from MergedLDSigCh
+    file norm_gene_counts
+    file vcf
   output:
-    file 'normalized_gene_counts.tsv' into norm_gene_counts_ch
-  '''
-  #!/usr/bin/env Rscript
-  if (!require("pacman")) install.packages("pacman")
-  pacman::p_load(
-    tidyverse,
-    stringr,
-    DESeq2
-  )
-
-  raw_counts <- read_tsv('gene_counts.tsv') %>% 
-    dplyr::select(-ensembl_gene_id) %>% 
-    as.data.frame() %>% 
-    column_to_rownames('gene_id')
-
-  meta <- tibble(sample_name = names(raw_counts)) 
-  x <- meta$sample_name %>% 
-    str_split_fixed('_', 2) %>% 
-    as_tibble()
-  colnames(x) <- c('timepoint', 'sampleID')
-  meta <- meta %>% bind_cols(x)
-
-  DESeqDataSetFromMatrix(raw_counts, colData = meta, design = ~ sampleID + timepoint) %>% 
-    estimateSizeFactors() %>% 
-    varianceStabilizingTransformation(blind = FALSE) %>%
-    assay() %>% 
-    as.data.frame() %>% 
-    rownames_to_column(var = 'gene_id') %>% 
-    write_tsv('normalized_gene_counts.tsv')
-  '''
+    file('plots/*.png') into eqtlPlotsCh
+  """
+  plot_eQTLs.R $norm_gene_counts $merged_eQTLs $vcf 'plots'
+  """
 }
+
