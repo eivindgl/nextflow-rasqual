@@ -1,4 +1,5 @@
 CeD_LD_SNPs = file('input_data/CeD_LD_SNPs_Iris_maf-.001_r2-9.bed')
+CeD_tag_SNPs = file('input_data/CeD_tag_SNPs.bed')
 gene_counts = file("${params.preprocessing_dir}/gene_counts.tsv")
 vcf = file ("${params.timepoint_base_dir}/all_timepoints.vcf")
 
@@ -47,14 +48,15 @@ Channel.fromPath('out/timepoint/rasqual_full_output/*_txt')
   (full_string, timepoint, run_mode) = (it.baseName =~ /time_([^_]+)_([^_]+).*/)[0]
   [run_mode, timepoint, it]
 }
-  .into { CeDSubInputCh }
+  .into { CeDSubInputCh ; preRouteCh }
 
-Channel.fromPath('out/timepoint/rasqual_full_output/time_*_lead_SNPs.rasqual_txt')
-  .map { 
-  (full_string, timepoint, run_mode) = (it.baseName =~ /time_([^_]+)_([^_]+).*/)[0]
-  [run_mode, timepoint, it]
-}
-  .into { leadSnpRawCh }
+leadSnpRawCh = Channel.create()
+allSnpRawCh = Channel.create()
+preRouteCh
+  .route ( 
+    lead: leadSnpRawCh, 
+    all: allSnpRawCh
+    ) { it[0] }
 
 process subset_CeD_LD_SNPs_from_rasqual_raw {
   module 'Python/3.5.1-foss-2015b'
@@ -65,6 +67,18 @@ process subset_CeD_LD_SNPs_from_rasqual_raw {
     set run_mode, timepoint, 'rasqual_CeD_LD_output.txt' into CedSubCh
   """
   filter_rasqual_by_SNP_subset.py $CeD_LD_SNPs -i rasqual_output.txt -o rasqual_CeD_LD_output.txt
+  """
+}
+
+process subset_CeD_tag_SNPs_from_rasqual_raw {
+  module 'Python/3.5.1-foss-2015b'
+  input:
+    file CeD_tag_SNPs
+    set run_mode, timepoint, 'rasqual_output.txt' from allSnpRawCh
+  output:
+    set val('tag'), timepoint, 'rasqual_CeD_tag_output.txt' into tagCedSubCh
+  """
+  filter_rasqual_by_SNP_subset.py $CeD_tag_SNPs -i rasqual_output.txt -o rasqual_CeD_tag_output.txt
   """
 }
 
@@ -86,7 +100,7 @@ process add_pvalue_FDR_and_annotations {
   publishDir "${params.post_proc_dir}/CeD_LD_subset", mode: 'copy'
   module 'R/3.3.1-foss-2015b'
   input:
-    set run_mode, timepoint, 'rasqual_output.txt' from CedSubCh
+    set run_mode, timepoint, 'rasqual_output.txt' from CedSubCh.mix(tagCedSubCh)
   output:
     file "LD_subset_${run_mode}_${timepoint}.tsv" into CedSubResultsPre
   """
@@ -151,6 +165,7 @@ process merge_FDR_sig_genes {
 
 process plot_top_CeD_eQTLs {
   publishDir "${params.post_proc_dir}/CeD_LD_top_eQTL_plots", mode: 'copy'
+  module 'R/3.3.1-foss-2015b'
   input:
     file merged_eQTLs from MergedLDSigCh
     file norm_gene_counts
